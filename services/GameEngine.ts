@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
-import { Player, Bullet, GameState, InputState, MAP_SIZE, PowerUp } from '../types';
+import { Player, Bullet, GameState, InputState, PowerUp } from '../types';
+import { MAP_SIZE } from '../constants';
 
 export class GameEngine {
   state: GameState;
@@ -13,42 +14,41 @@ export class GameEngine {
       powerUps: [],
       killFeed: [],
       mapSize: MAP_SIZE,
+      startTime: Date.now(),
+      bossSpawned: false,
+      isGameOver: false
     };
   }
 
   initGame(options: { botCount: number, roomCode?: string, playerName?: string }) {
-    // 1. Очистка
     this.state.players.clear();
     this.state.bullets = [];
     this.state.powerUps = [];
     this.state.killFeed = [];
     this.state.roomCode = options.roomCode;
+    
+    this.state.startTime = Date.now();
+    this.state.bossSpawned = false;
+    this.state.isGameOver = false;
 
-    // 2. Если сокет уже был, отключаем его перед созданием нового
     if (this.socket) {
         this.socket.disconnect();
     }
 
-    // 3. Создаем новое подключение
-    // ВАЖНО: Если вы играете по сети (разные устройства), замените 'localhost' на IP вашего ПК
     this.socket = io('http://localhost:3001'); 
 
-    // Функция отправки запроса на вход
     const joinRoom = () => {
         console.log('Joining room:', options.roomCode);
         this.socket?.emit('join_room', { 
             roomCode: options.roomCode || 'default',
             name: options.playerName || 'Operative',
-            botCount: options.botCount // <-- ТЕПЕРЬ ПЕРЕДАЕМ КОЛИЧЕСТВО БОТОВ
+            botCount: options.botCount
         });
     };
 
-    // 4. Обработка подключения
-    // Если сокет подключился мгновенно (например, на локалхосте)
     if (this.socket.connected) {
         joinRoom();
     } else {
-        // Иначе ждем события
         this.socket.on('connect', () => {
             console.log('Connected to game server!');
             joinRoom();
@@ -75,11 +75,15 @@ export class GameEngine {
         this.state.bullets = serverState.bullets;
         this.state.killFeed = serverState.killFeed || [];
         this.state.powerUps = serverState.powerUps || [];
+        
+        this.state.startTime = serverState.startTime;
+        this.state.bossSpawned = serverState.bossSpawned;
+        this.state.isGameOver = serverState.isGameOver;
     });
   }
 
   addPlayer(id: string, name: string) {
-      return { id, name, hp: 100 } as Player;
+      return { id, name, hp: 100, level: 1 } as Player;
   }
 
   removePlayer(id: string) {
@@ -90,6 +94,8 @@ export class GameEngine {
   }
 
   update(deltaTime: number, playerInput: InputState, playerId: string) {
+    if (this.state.isGameOver) return;
+
     if (this.socket && this.myId) {
         this.socket.emit('input', {
             up: playerInput.up,

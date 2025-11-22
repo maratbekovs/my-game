@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { BattleArena } from './components/BattleArena';
 import { GameProvider, useGameEngine } from './services/GameContext';
 
-// Internal component to handle game launch logic since we need access to the context
 const GameLobby: React.FC = () => {
   const engine = useGameEngine();
   const [view, setView] = useState<'menu' | 'host' | 'join' | 'game'>('menu');
@@ -22,7 +21,6 @@ const GameLobby: React.FC = () => {
   };
 
   const handleHostStart = () => {
-    // ПЕРЕДАЕМ playerName
     engine.initGame({ 
       botCount: botCount, 
       roomCode,
@@ -33,7 +31,6 @@ const GameLobby: React.FC = () => {
 
   const handleJoinStart = () => {
     if (roomCode.length !== 6) return;
-    // ПЕРЕДАЕМ playerName
     engine.initGame({ 
       botCount: 0, 
       roomCode,
@@ -48,7 +45,6 @@ const GameLobby: React.FC = () => {
 
   return (
     <div className="relative flex h-screen w-full flex-col items-center justify-center overflow-hidden bg-[#050505] text-white">
-      {/* Background */}
       <div className="absolute inset-0 z-0 opacity-20" 
            style={{ 
              backgroundImage: 'linear-gradient(#155e75 1px, transparent 1px), linear-gradient(90deg, #155e75 1px, transparent 1px)', 
@@ -67,7 +63,6 @@ const GameLobby: React.FC = () => {
           <div className="mt-2 h-1 w-full bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-50"></div>
         </div>
 
-        {/* Main Menu View */}
         {view === 'menu' && (
           <div className="flex flex-col gap-4 animate-fadeIn">
              <div className="space-y-2 mb-4">
@@ -93,7 +88,6 @@ const GameLobby: React.FC = () => {
           </div>
         )}
 
-        {/* Host View */}
         {view === 'host' && (
           <div className="flex flex-col gap-6 bg-slate-900/90 p-6 rounded-xl border border-slate-700 backdrop-blur-xl animate-fadeIn">
             <div className="text-center">
@@ -129,7 +123,6 @@ const GameLobby: React.FC = () => {
           </div>
         )}
 
-        {/* Join View */}
         {view === 'join' && (
           <div className="flex flex-col gap-6 bg-slate-900/90 p-6 rounded-xl border border-slate-700 backdrop-blur-xl animate-fadeIn">
             <div className="space-y-2">

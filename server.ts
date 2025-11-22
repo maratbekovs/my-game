@@ -2,8 +2,27 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
+import { 
+  BOSS_HP, 
+  BOSS_RADIUS, 
+  BOSS_SPAWN_TIME_MS, 
+  BULLET_DAMAGE, 
+  BULLET_RADIUS, 
+  BULLET_SPEED, 
+  ENERGY_COST, 
+  ENERGY_REGEN, 
+  FIRE_RATE_MS, 
+  MAP_SIZE, 
+  MAX_ENERGY, 
+  MAX_POWERUPS, 
+  PLAYER_RADIUS, 
+  PLAYER_SPEED, 
+  POWERUP_RADIUS, 
+  POWERUP_SPAWN_RATE_MS, 
+  BUFF_DURATION_MS,
+  OBSTACLES 
+} from './constants';
 
-// --- Типы ---
 type PowerUpType = 'HEALTH' | 'SPEED' | 'DAMAGE';
 
 interface PowerUp {
@@ -25,7 +44,7 @@ interface Player {
   radius: number;
   color: string;
   name: string;
-  score: number;
+  score: number; 
   isDead: boolean;
   respawnTimer: number;
   isBot: boolean;
@@ -33,6 +52,8 @@ interface Player {
   speedBoostTimer: number;
   damageBoostTimer: number;
   invulnerabilityTimer: number;
+  isBoss?: boolean;
+  level: number;
 }
 
 interface Bullet {
@@ -54,35 +75,11 @@ interface GameState {
   killFeed: any[];
   mapSize: { width: number; height: number };
   lastPowerUpSpawn: number;
+  startTime: number;
+  bossSpawned: boolean;
+  isGameOver: boolean;
 }
 
-// --- Константы ---
-const MAP_SIZE = { width: 2000, height: 2000 };
-const PLAYER_SPEED = 5;
-const PLAYER_RADIUS = 20;
-const BULLET_SPEED = 15;
-const BULLET_RADIUS = 5;
-const BULLET_DAMAGE = 15;
-
-const MAX_ENERGY = 100;
-const ENERGY_COST = 15;
-const ENERGY_REGEN = 30;
-const FIRE_RATE_MS = 100;
-
-const POWERUP_RADIUS = 15;
-const MAX_POWERUPS = 10;
-const POWERUP_SPAWN_RATE_MS = 5000;
-const BUFF_DURATION_MS = 10000;
-
-const OBSTACLES = [
-  { x: 500, y: 500, w: 200, h: 50 },
-  { x: 1200, y: 800, w: 50, h: 300 },
-  { x: 800, y: 200, w: 100, h: 100 },
-  { x: 200, y: 1500, w: 300, h: 50 },
-  { x: 1500, y: 1200, w: 200, h: 200 },
-];
-
-// --- Хелперы ---
 function checkWallCollision(x: number, y: number, radius: number = 0): boolean {
     for (const obs of OBSTACLES) {
         if (x + radius > obs.x && x - radius < obs.x + obs.w &&
@@ -93,22 +90,19 @@ function checkWallCollision(x: number, y: number, radius: number = 0): boolean {
     return false;
 }
 
-function getRandomSafePosition() {
+function getRandomSafePosition(radius = PLAYER_RADIUS) {
     let x, y, valid = false;
-    // Защита от бесконечного цикла (максимум 100 попыток)
     let attempts = 0;
     while (!valid && attempts < 100) {
-        x = Math.random() * (MAP_SIZE.width - 100) + 50;
-        y = Math.random() * (MAP_SIZE.height - 100) + 50;
-        if (!checkWallCollision(x, y, PLAYER_RADIUS + 10)) valid = true;
+        x = Math.random() * (MAP_SIZE.width - 200) + 100;
+        y = Math.random() * (MAP_SIZE.height - 200) + 100;
+        if (!checkWallCollision(x, y, radius + 10)) valid = true;
         attempts++;
     }
-    // Фолбек, если не нашли место (спавн в углу)
     if (!valid) { x = 100; y = 100; }
     return { x: x!, y: y! };
 }
 
-// --- Сервер ---
 const app = express();
 app.use(cors());
 const httpServer = createServer(app);
@@ -125,21 +119,20 @@ const createRoomState = (): GameState => ({
   killFeed: [],
   mapSize: MAP_SIZE,
   lastPowerUpSpawn: Date.now(),
+  startTime: Date.now(),
+  bossSpawned: false,
+  isGameOver: false
 });
 
 io.on('connection', (socket: Socket) => {
   let currentRoom = '';
 
-  // --- ИСПРАВЛЕНИЕ ЗДЕСЬ: Добавили botCount в аргументы ---
   socket.on('join_room', ({ roomCode, name, botCount }: { roomCode: string, name: string, botCount?: number }) => {
     socket.join(roomCode);
     currentRoom = roomCode;
 
-    // Если комнаты нет, создаем её (тот кто создал - Хост)
     if (!ROOMS[roomCode]) {
       ROOMS[roomCode] = createRoomState();
-      
-      // Используем переданное количество ботов или 0
       const count = typeof botCount === 'number' ? botCount : 0;
       for(let i=0; i < count; i++) {
           addBot(ROOMS[roomCode], `AI-${i+1}`);
@@ -156,7 +149,8 @@ io.on('connection', (socket: Socket) => {
       name: name || 'Operative',
       score: 0, isDead: false, respawnTimer: 0,
       isBot: false, lastFireTime: 0,
-      speedBoostTimer: 0, damageBoostTimer: 0, invulnerabilityTimer: 3000 
+      speedBoostTimer: 0, damageBoostTimer: 0, invulnerabilityTimer: 3000,
+      level: 1
     };
 
     ROOMS[roomCode].players[socket.id] = player;
@@ -166,6 +160,9 @@ io.on('connection', (socket: Socket) => {
   socket.on('input', (input: any) => {
     if (!currentRoom || !ROOMS[currentRoom]) return;
     const state = ROOMS[currentRoom];
+    
+    if (state.isGameOver) return;
+
     const player = state.players[socket.id];
     if (!player || player.isDead) return;
 
@@ -214,29 +211,67 @@ function addBot(state: GameState, name: string) {
         angle: 0, radius: PLAYER_RADIUS, color: '#ef4444',
         name, score: 0, isDead: false, respawnTimer: 0,
         isBot: true, lastFireTime: 0,
-        speedBoostTimer: 0, damageBoostTimer: 0, invulnerabilityTimer: 0
+        speedBoostTimer: 0, damageBoostTimer: 0, invulnerabilityTimer: 0,
+        level: 1
     };
+}
+
+function spawnBoss(state: GameState) {
+    const id = 'BOSS';
+    const pos = getRandomSafePosition(BOSS_RADIUS);
+    
+    state.players[id] = {
+        id,
+        x: pos.x, y: pos.y,
+        hp: BOSS_HP, maxHp: BOSS_HP,
+        energy: 1000, maxEnergy: 1000,
+        angle: 0, radius: BOSS_RADIUS, color: '#ff0000',
+        name: "CYBER-DEMON", score: 0, isDead: false, respawnTimer: 0,
+        isBot: true, isBoss: true,
+        lastFireTime: 0,
+        speedBoostTimer: 0, damageBoostTimer: 0, invulnerabilityTimer: 0,
+        level: 100
+    };
+    
+    state.killFeed.unshift({
+        id: Math.random().toString(),
+        killerName: "SYSTEM",
+        victimName: "BOSS HAS AWAKENED",
+        timestamp: Date.now()
+    });
 }
 
 function attemptShoot(state: GameState, p: Player) {
     const now = Date.now();
     if (now - p.lastFireTime < FIRE_RATE_MS) return;
-    if (p.energy < ENERGY_COST) return;
+    if (p.energy < ENERGY_COST && !p.isBoss) return;
 
-    p.energy -= ENERGY_COST;
+    if (!p.isBoss) p.energy -= ENERGY_COST;
     p.lastFireTime = now;
 
-    const damage = p.damageBoostTimer > 0 ? BULLET_DAMAGE * 2 : BULLET_DAMAGE;
-    const color = p.damageBoostTimer > 0 ? '#d946ef' : p.color; 
+    let damage = BULLET_DAMAGE;
+    let color = p.color;
+    let size = BULLET_RADIUS;
+
+    if (p.damageBoostTimer > 0) {
+        damage *= 2;
+        color = '#d946ef';
+    }
+
+    if (p.isBoss) {
+        damage = 40;
+        size = 15;
+        color = '#ff0000';
+    }
 
     const bullet: Bullet = {
         id: Math.random().toString(36).substr(2,9),
-        x: p.x + Math.cos(p.angle) * 25,
-        y: p.y + Math.sin(p.angle) * 25,
+        x: p.x + Math.cos(p.angle) * (p.radius + 10),
+        y: p.y + Math.sin(p.angle) * (p.radius + 10),
         vx: Math.cos(p.angle) * BULLET_SPEED,
         vy: Math.sin(p.angle) * BULLET_SPEED,
         ownerId: p.id,
-        radius: BULLET_RADIUS,
+        radius: size,
         damage: damage,
         color: color
     };
@@ -244,6 +279,8 @@ function attemptShoot(state: GameState, p: Player) {
 }
 
 function updateBots(state: GameState) {
+    if (state.isGameOver) return; 
+
     const players = Object.values(state.players);
     players.forEach(bot => {
         if (!bot.isBot || bot.isDead) return;
@@ -251,20 +288,27 @@ function updateBots(state: GameState) {
         let targetX = bot.x, targetY = bot.y;
         let action = 'IDLE';
 
+        let detectionRange = bot.isBoss ? 2000 : 400;
+
         let nearestPupDist = Infinity;
         let nearestPup: PowerUp | null = null;
-        state.powerUps.forEach(pup => {
-            const dist = Math.hypot(pup.x - bot.x, pup.y - bot.y);
-            if (dist < 400 && dist < nearestPupDist) {
-                nearestPupDist = dist;
-                nearestPup = pup;
-            }
-        });
+        
+        if (!bot.isBoss) {
+            state.powerUps.forEach(pup => {
+                const dist = Math.hypot(pup.x - bot.x, pup.y - bot.y);
+                if (dist < detectionRange && dist < nearestPupDist) {
+                    nearestPupDist = dist;
+                    nearestPup = pup;
+                }
+            });
+        }
 
         let nearestEnemy: Player | null = null;
         let minEnemyDist = Infinity;
         players.forEach(target => {
-            if (target.id !== bot.id && !target.isDead) {
+            const isTargetValid = target.id !== bot.id && !target.isDead;
+            
+            if (isTargetValid) {
                 const dist = Math.hypot(target.x - bot.x, target.y - bot.y);
                 if (dist < minEnemyDist) {
                     minEnemyDist = dist;
@@ -283,13 +327,19 @@ function updateBots(state: GameState) {
             const angleToTarget = Math.atan2(targetY - bot.y, targetX - bot.x);
             bot.angle = angleToTarget;
             
-            const speed = bot.speedBoostTimer > 0 ? PLAYER_SPEED * 1.2 : PLAYER_SPEED * 0.8; 
+            let baseSpeed = PLAYER_SPEED;
+            if (bot.isBoss) baseSpeed = PLAYER_SPEED * 0.6; 
+
+            const speed = bot.speedBoostTimer > 0 ? baseSpeed * 1.2 : baseSpeed * 0.8; 
             let moveX = 0, moveY = 0;
 
-            if (action === 'MOVE_TO' || (action === 'ATTACK' && minEnemyDist > 300)) {
+            let attackDist = bot.isBoss ? 1000 : 300;
+            let stopDist = bot.isBoss ? 100 : 150;
+
+            if (action === 'MOVE_TO' || (action === 'ATTACK' && minEnemyDist > attackDist)) {
                 moveX = Math.cos(angleToTarget) * speed;
                 moveY = Math.sin(angleToTarget) * speed;
-            } else if (action === 'ATTACK' && minEnemyDist < 150) {
+            } else if (action === 'ATTACK' && minEnemyDist < stopDist) {
                 moveX = -Math.cos(angleToTarget) * speed;
                 moveY = -Math.sin(angleToTarget) * speed;
             } else {
@@ -300,20 +350,19 @@ function updateBots(state: GameState) {
             const nextX = bot.x + moveX;
             const nextY = bot.y + moveY;
 
-            if (!checkWallCollision(nextX, bot.y, PLAYER_RADIUS)) bot.x = nextX;
-            if (!checkWallCollision(bot.x, nextY, PLAYER_RADIUS)) bot.y = nextY;
+            if (!checkWallCollision(nextX, bot.y, bot.radius)) bot.x = nextX;
+            if (!checkWallCollision(bot.x, nextY, bot.radius)) bot.y = nextY;
             
-            bot.x = Math.max(PLAYER_RADIUS, Math.min(MAP_SIZE.width - PLAYER_RADIUS, bot.x));
-            bot.y = Math.max(PLAYER_RADIUS, Math.min(MAP_SIZE.height - PLAYER_RADIUS, bot.y));
+            bot.x = Math.max(bot.radius, Math.min(MAP_SIZE.width - bot.radius, bot.x));
+            bot.y = Math.max(bot.radius, Math.min(MAP_SIZE.height - bot.radius, bot.y));
 
-            if (action === 'ATTACK' && minEnemyDist < 600) {
+            if (action === 'ATTACK' && minEnemyDist < (bot.isBoss ? 1200 : 600)) {
                  attemptShoot(state, bot);
             }
         }
     });
 }
 
-// --- Игровой Цикл ---
 const TICK_RATE = 60;
 setInterval(() => {
   const now = Date.now();
@@ -321,6 +370,24 @@ setInterval(() => {
   for (const roomCode in ROOMS) {
     const state = ROOMS[roomCode];
     
+    if (state.isGameOver) {
+        io.to(roomCode).emit('game_state', {
+            players: Object.values(state.players),
+            bullets: state.bullets,
+            powerUps: state.powerUps,
+            killFeed: state.killFeed,
+            startTime: state.startTime,
+            bossSpawned: state.bossSpawned,
+            isGameOver: state.isGameOver
+        });
+        continue;
+    }
+
+    if (!state.bossSpawned && (now - state.startTime > BOSS_SPAWN_TIME_MS)) {
+        spawnBoss(state);
+        state.bossSpawned = true;
+    }
+
     if (state.powerUps.length < MAX_POWERUPS && now - state.lastPowerUpSpawn > POWERUP_SPAWN_RATE_MS) {
         if (Math.random() > 0.3) {
             const pos = getRandomSafePosition();
@@ -339,8 +406,8 @@ setInterval(() => {
         let consumed = false;
         for (const pid in state.players) {
             const p = state.players[pid];
-            if (p.isDead) continue;
-            if (Math.hypot(p.x - pup.x, p.y - pup.y) < PLAYER_RADIUS + POWERUP_RADIUS) {
+            if (p.isDead || p.isBoss) continue;
+            if (Math.hypot(p.x - pup.x, p.y - pup.y) < p.radius + POWERUP_RADIUS) {
                 if (pup.type === 'HEALTH') p.hp = Math.min(p.maxHp, p.hp + 50);
                 else if (pup.type === 'SPEED') p.speedBoostTimer = BUFF_DURATION_MS;
                 else if (pup.type === 'DAMAGE') p.damageBoostTimer = BUFF_DURATION_MS;
@@ -358,7 +425,7 @@ setInterval(() => {
        b.x += b.vx;
        b.y += b.vy;
 
-       if (b.x < 0 || b.x > MAP_SIZE.width || b.y < 0 || b.y > MAP_SIZE.height || checkWallCollision(b.x, b.y, BULLET_RADIUS)) {
+       if (b.x < 0 || b.x > MAP_SIZE.width || b.y < 0 || b.y > MAP_SIZE.height || checkWallCollision(b.x, b.y, b.radius)) {
          state.bullets.splice(i, 1);
          continue;
        }
@@ -373,21 +440,58 @@ setInterval(() => {
             if (p.hp <= 0) {
                 p.isDead = true;
                 p.hp = 0;
-                p.respawnTimer = 3000; 
+                p.respawnTimer = 3000;
+                
                 const killer = state.players[b.ownerId];
-                if (killer) killer.score++;
+                if (killer) {
+                    if (p.isBoss) {
+                        state.isGameOver = true;
+                        killer.score += 10; 
+                        killer.level = Math.floor(killer.score / 10) + 1; 
+                        
+                        state.killFeed.unshift({
+                            id: Math.random().toString(),
+                            killerName: killer.name,
+                            victimName: "BOSS DESTROYED",
+                            timestamp: Date.now()
+                        });
+                        break;
+                    } else {
+                        killer.score++;
+                        
+                        const newLevel = Math.floor(killer.score / 10) + 1;
+                        if (newLevel > killer.level) {
+                            killer.level = newLevel;
+                            killer.maxHp += 50;
+                            killer.hp = killer.maxHp; 
+                            killer.damageBoostTimer = 15000; 
+                            killer.speedBoostTimer = 15000; 
+                            
+                            state.killFeed.unshift({
+                                id: Math.random().toString(),
+                                killerName: "SYSTEM",
+                                victimName: `${killer.name} LEVEL UP!`,
+                                timestamp: Date.now()
+                            });
+
+                            io.to(killer.id).emit('buff_alert', `LEVEL ${newLevel}! KILLS: ${killer.score}`);
+                        }
+                    }
+                }
+
                 state.killFeed.unshift({
                     id: Math.random().toString(),
                     killerName: killer ? killer.name : 'Unknown',
                     victimName: p.name,
                     timestamp: Date.now()
                 });
-                if (state.killFeed.length > 5) state.killFeed.pop();
+                if (state.killFeed.length > 3) state.killFeed.pop();
             }
             break;
          }
        }
        if (hit) state.bullets.splice(i, 1);
+       if (state.isGameOver) break;
     }
 
     for (const pid in state.players) {
@@ -404,10 +508,10 @@ setInterval(() => {
 
         if (p.isDead) {
             p.respawnTimer -= dt;
-            if (p.respawnTimer <= 0) {
+            if (p.respawnTimer <= 0 && !p.isBoss) {
                 p.isDead = false;
-                p.hp = 100;
-                p.energy = 100;
+                p.hp = p.maxHp;
+                p.energy = p.maxEnergy;
                 const pos = getRandomSafePosition();
                 p.x = pos.x; p.y = pos.y;
                 p.invulnerabilityTimer = 3000;
@@ -419,7 +523,10 @@ setInterval(() => {
         players: Object.values(state.players),
         bullets: state.bullets,
         powerUps: state.powerUps,
-        killFeed: state.killFeed
+        killFeed: state.killFeed,
+        startTime: state.startTime,
+        bossSpawned: state.bossSpawned,
+        isGameOver: state.isGameOver
     });
   }
 }, 1000 / TICK_RATE);

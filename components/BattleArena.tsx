@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useGameEngine } from '../services/GameContext';
-import { InputState, MAP_SIZE, PowerUpType } from '../types';
-import { OBSTACLES, POWERUP_RADIUS } from '../constants';
+import { InputState, PowerUpType } from '../types';
+import { OBSTACLES, POWERUP_RADIUS, MAP_SIZE } from '../constants';
 import { UI } from './UI';
 
 interface Props {
@@ -14,6 +14,7 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [myId, setMyId] = useState<string>('');
   const [, setTick] = useState(0);
+  const [buffNotifications, setBuffNotifications] = useState<{id: number, text: string}[]>([]);
   
   const inputRef = useRef<InputState>({
     up: false, down: false, left: false, right: false, shoot: false, mouseX: 0, mouseY: 0
@@ -26,8 +27,24 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
             clearInterval(waitForId);
         }
     }, 100);
+
+    if (engine.socket) {
+        engine.socket.on('buff_alert', (msg: string) => {
+            const id = Date.now();
+            setBuffNotifications(prev => {
+                const newState = [{id, text: msg}, ...prev];
+                return newState.slice(0, 3);
+            });
+            
+            setTimeout(() => {
+                setBuffNotifications(prev => prev.filter(n => n.id !== id));
+            }, 4000);
+        });
+    }
+
     return () => { 
         clearInterval(waitForId);
+        if (engine.socket) engine.socket.off('buff_alert');
         if (engine.myId) engine.removePlayer(engine.myId); 
     };
   }, [engine]);
@@ -86,20 +103,15 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
           return;
       }
 
-      // --- ИЗМЕНЕНИЕ: КАМЕРА ВСЕГДА ПО ЦЕНТРУ ---
-      // Мы больше не используем Math.max/min для ограничения краев
-      // Теперь игрок всегда находится ровно в (width/2, height/2)
       const targetCamX = myPlayer.x - width / 2;
       const targetCamY = myPlayer.y - height / 2;
       
-      // BG
       ctx.fillStyle = '#050505';
       ctx.fillRect(0, 0, width, height);
 
       ctx.save();
       ctx.translate(-targetCamX, -targetCamY);
 
-      // Grid
       ctx.lineWidth = 1;
       ctx.strokeStyle = '#1e293b'; 
       ctx.beginPath();
@@ -111,7 +123,6 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
       }
       ctx.stroke();
 
-      // Obstacles
       for (const obs of OBSTACLES) {
           ctx.shadowBlur = 15;
           ctx.shadowColor = obs.color; 
@@ -123,7 +134,6 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
           ctx.strokeRect(obs.x, obs.y, obs.w, obs.h);
       }
 
-      // --- PowerUps ---
       const time = Date.now();
       for (const p of engine.state.powerUps) {
           const floatY = Math.sin(time / 200) * 5;
@@ -150,7 +160,6 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
           ctx.fillText(label, p.x, p.y + floatY);
       }
 
-      // --- Bullets ---
       ctx.lineCap = 'round';
       for (const b of engine.state.bullets) {
         ctx.shadowBlur = 10;
@@ -171,7 +180,6 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
         ctx.shadowBlur = 0;
       }
 
-      // --- Players ---
       engine.state.players.forEach((p) => {
         if (p.isDead) return;
 
@@ -192,6 +200,19 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
             ctx.setLineDash([5, 5]);
             ctx.stroke();
             ctx.setLineDash([]);
+        }
+
+        if (p.isBoss) {
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(Date.now() / 1000);
+            ctx.strokeStyle = '#b91c1c';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([20, 10]);
+            ctx.beginPath();
+            ctx.arc(0, 0, p.radius + 10, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
         }
 
         if (p.invulnerabilityTimer > 0) {
@@ -220,38 +241,40 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
         ctx.translate(p.x, p.y);
         ctx.rotate(p.angle);
         
-        ctx.fillStyle = '#334155';
-        ctx.fillRect(0, -6, 35, 12);
+        ctx.fillStyle = p.isBoss ? '#7f1d1d' : '#334155';
+        const gunW = p.isBoss ? 60 : 35;
+        const gunH = p.isBoss ? 20 : 12;
+        ctx.fillRect(0, -gunH/2, gunW, gunH);
         ctx.strokeStyle = p.color;
         ctx.lineWidth = 2;
-        ctx.strokeRect(0, -6, 35, 12);
+        ctx.strokeRect(0, -gunH/2, gunW, gunH);
         
         ctx.restore();
 
-        ctx.shadowBlur = 20;
+        ctx.shadowBlur = p.isBoss ? 50 : 20;
         ctx.shadowColor = p.color;
         
-        ctx.fillStyle = '#0f172a';
+        ctx.fillStyle = p.isBoss ? '#450a0a' : '#0f172a';
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
 
-        ctx.lineWidth = 3;
+        ctx.lineWidth = p.isBoss ? 6 : 3;
         ctx.strokeStyle = p.color;
         ctx.stroke();
 
-        ctx.font = 'bold 14px "Rajdhani", sans-serif';
-        ctx.fillStyle = '#e2e8f0';
+        ctx.font = p.isBoss ? 'bold 24px "Orbitron"' : 'bold 14px "Rajdhani", sans-serif';
+        ctx.fillStyle = p.isBoss ? '#f87171' : '#e2e8f0';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(p.name, p.x, p.y - p.radius - 10);
+        ctx.fillText(p.name, p.x, p.y - p.radius - (p.isBoss ? 20 : 10));
 
-        const hpPct = p.hp / p.maxHp;
-        const barW = 40;
-        const barH = 4;
+        const hpPct = Math.max(0, p.hp / p.maxHp);
+        const barW = p.isBoss ? 120 : 40;
+        const barH = p.isBoss ? 10 : 4;
         const barX = p.x - barW/2;
-        const barY = p.y - p.radius - 8;
+        const barY = p.y - p.radius - (p.isBoss ? 15 : 8);
         
         ctx.fillStyle = '#1e293b';
         ctx.fillRect(barX, barY, barW, barH);
@@ -259,7 +282,6 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
         ctx.fillRect(barX, barY, barW * hpPct, barH);
       });
 
-      // Map Borders
       ctx.strokeStyle = '#ef4444';
       ctx.lineWidth = 4;
       ctx.shadowColor = '#ef4444';
@@ -280,13 +302,10 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
       const dt = time - lastTime;
       lastTime = time;
       
-      // UPDATE INPUT
       const p = engine.state.players.get(myId);
       if (p && !p.isDead) {
          const w = window.innerWidth;
          const h = window.innerHeight;
-         // Здесь тоже нужно изменить логику, чтобы прицел не сбивался
-         // Так как камера теперь центрирована, позиция игрока на экране ВСЕГДА центр
          const screenX = w / 2;
          const screenY = h / 2;
          
@@ -323,7 +342,8 @@ export const BattleArena: React.FC<Props> = ({ playerName, onExit }) => {
   return (
     <div className="relative h-full w-full overflow-hidden bg-[#050505] cursor-crosshair">
       <canvas ref={canvasRef} className="block" />
-      {myId && <UI gameState={engine.state} myPlayerId={myId} onExit={onExit} />}
+      
+      {myId && <UI gameState={engine.state} myPlayerId={myId} onExit={onExit} buffNotifications={buffNotifications} />}
       
       {myPlayer?.isDead && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50">

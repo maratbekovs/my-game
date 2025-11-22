@@ -1,4 +1,3 @@
-
 export interface InputState {
   up: boolean;
   down: boolean;
@@ -36,9 +35,10 @@ export interface Player {
   respawnTimer: number;
   invulnerabilityTimer: number;
   isBot: boolean;
-  // Buff timers
   speedBoostTimer: number;
   damageBoostTimer: number;
+  isBoss?: boolean;
+  level: number;
 }
 
 export interface Bullet {
@@ -67,7 +67,9 @@ export interface GameState {
   killFeed: KillEvent[];
   mapSize: { width: number; height: number };
   roomCode?: string;
+  startTime: number;
+  bossSpawned: boolean;
+  isGameOver: boolean;
 }
 
-export const MAP_SIZE = { width: 2000, height: 2000 };
 export const VIEWPORT_SIZE = { width: window.innerWidth, height: window.innerHeight };

@@ -1,3 +1,4 @@
+export const MAP_SIZE = { width: 2000, height: 2000 };
 
 export const PLAYER_SPEED = 5;
 export const PLAYER_RADIUS = 20;
@@ -7,16 +8,19 @@ export const BULLET_DAMAGE = 15;
 export const FIRE_RATE_MS = 100; 
 export const RESPAWN_TIME_MS = 3000;
 
-// Energy System
 export const MAX_ENERGY = 100;
 export const ENERGY_COST = 15; 
-export const ENERGY_REGEN = 30; 
+export const ENERGY_REGEN = 30;
 
-// Power Up System
 export const POWERUP_RADIUS = 15;
 export const BUFF_DURATION_MS = 10000; 
 export const POWERUP_SPAWN_RATE_MS = 5000; 
 export const MAX_POWERUPS = 10;
+
+export const BOSS_SPAWN_TIME_MS = 5 * 60 * 1000;
+export const BOSS_HP = 5000;
+export const BOSS_RADIUS = 80;
+export const BOSS_DAMAGE_MULTIPLIER = 3;
 
 export const COLORS = [
   '#06b6d4',
