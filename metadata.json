@@ -1,5 +1,5 @@
 {
   "name": "Neon Battle Arena",
-  "description": "A fast-paced, top-down shooter prototype featuring real-time canvas rendering, bot AI, and a complete game loop simulation. Designed to demonstrate multiplayer architecture in a client-side environment.",
+  "description": "Game.",
   "requestFramePermissions": []
 }

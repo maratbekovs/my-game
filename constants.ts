@@ -14,17 +14,17 @@ export const ENERGY_REGEN = 30;
 
 // Power Up System
 export const POWERUP_RADIUS = 15;
-export const BUFF_DURATION_MS = 10000; // 10 seconds
-export const POWERUP_SPAWN_RATE_MS = 5000; // Try to spawn every 5 sec
+export const BUFF_DURATION_MS = 10000; 
+export const POWERUP_SPAWN_RATE_MS = 5000; 
 export const MAX_POWERUPS = 10;
 
 export const COLORS = [
-  '#06b6d4', // Cyan
-  '#ef4444', // Red
-  '#22c55e', // Green
-  '#eab308', // Yellow
-  '#a855f7', // Purple
-  '#f97316', // Orange
+  '#06b6d4',
+  '#ef4444', 
+  '#22c55e',
+  '#eab308', 
+  '#a855f7', 
+  '#f97316', 
 ];
 
 export const OBSTACLES = [

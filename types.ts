@@ -7,7 +7,7 @@ export interface InputState {
   shoot: boolean;
   mouseX: number;
   mouseY: number;
-  facingAngle?: number; // Calculated angle taking camera into account
+  facingAngle?: number; 
 }
 
 export type PowerUpType = 'HEALTH' | 'SPEED' | 'DAMAGE';
